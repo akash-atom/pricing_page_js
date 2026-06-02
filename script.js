@@ -37,8 +37,10 @@
       '.table-section-header{cursor:pointer;}' +
       ICON_SELECTOR + '{transition:transform .35s ease;}' +
       '.table-section-header.is-open ' + ICON_SELECTOR + '{transform:rotate(180deg);}' +
-      // transition added after first paint to avoid a load flash
-      '.' + SLIDE_CLASS + '{transition:height .35s ease;overflow:hidden;}';
+      // transition added after first paint to avoid a load flash.
+      // NOTE: only clip the vertical axis so the table can still scroll
+      // horizontally on mobile (overflow-x is left to Webflow's own CSS).
+      '.' + SLIDE_CLASS + '{transition:height .35s ease;overflow-y:hidden;}';
     var style = document.createElement('style');
     style.id = 'aw-accordion-styles';
     style.type = 'text/css';
@@ -118,8 +120,9 @@
     if (!header.getAttribute('role')) header.setAttribute('role', 'button');
     if (!header.hasAttribute('tabindex')) header.setAttribute('tabindex', '0');
 
-    // initial state WITHOUT animation (slide class added after first paint)
-    instance.style.overflow = 'hidden';
+    // initial state WITHOUT animation (slide class added after first paint).
+    // Only clip vertically so horizontal scroll (mobile) keeps working.
+    instance.style.overflowY = 'hidden';
     if (startOpen) {
       instance.setAttribute('data-aw-open', '1');
       header.setAttribute('aria-expanded', 'true');
