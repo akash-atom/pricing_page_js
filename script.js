@@ -219,3 +219,185 @@
     bootstrap();
   }
 })();
+
+/* Tooltips
+ *
+ * Markup built in Webflow (positioning + styling are Webflow's job):
+ *
+ *   .tooltip-wrap            (position: relative)
+ *     .tooltip-trigger       (the hover/tap target)
+ *     .tooltip-content       (the bubble, hidden by default)
+ *
+ * This script only toggles classes:
+ *   - .tooltip-content gets `is-visible`
+ *   - .tooltip-wrap    gets `is-open`
+ * Style the visible state in Webflow off either of those.
+ *
+ * Behaviour: hover on devices that support it; tap-to-toggle on touch
+ * devices (with outside-tap + Escape to close). Keyboard focus also opens.
+ * Auto-wires every .tooltip-wrap on the page, including ones injected later
+ * (e.g. Finsweet table rows).
+ *
+ * ES5 only (var / no arrow functions) for browser compatibility.
+ */
+(function () {
+  'use strict';
+
+  var WRAP_SELECTOR = '.tooltip-wrap';
+  var TRIGGER_SELECTOR = '.tooltip-trigger';
+  var CONTENT_SELECTOR = '.tooltip-content';
+  var VISIBLE_CLASS = 'is-visible';
+  var OPEN_CLASS = 'is-open';
+  var INIT_FLAG = 'awTooltipBound';
+
+  // Hover devices use mouseenter/leave; touch devices use tap-to-toggle.
+  var hoverCapable = !(
+    window.matchMedia && window.matchMedia('(hover: none)').matches
+  );
+
+  var uid = 0;
+
+  function matches(el, selector) {
+    if (!el || el.nodeType !== 1) return false;
+    var fn =
+      el.matches ||
+      el.webkitMatchesSelector ||
+      el.msMatchesSelector ||
+      el.mozMatchesSelector;
+    return fn ? fn.call(el, selector) : false;
+  }
+
+  function closest(el, selector) {
+    while (el && el.nodeType === 1) {
+      if (matches(el, selector)) return el;
+      el = el.parentNode;
+    }
+    return null;
+  }
+
+  function addClass(el, cls) {
+    if (el && el.className.indexOf(cls) === -1) el.className += ' ' + cls;
+  }
+
+  function removeClass(el, cls) {
+    if (el) {
+      el.className = el.className.replace(
+        new RegExp('\\s*\\b' + cls + '\\b', 'g'),
+        ''
+      );
+    }
+  }
+
+  function hide(wrap) {
+    if (!wrap) return;
+    removeClass(wrap.querySelector(CONTENT_SELECTOR), VISIBLE_CLASS);
+    removeClass(wrap, OPEN_CLASS);
+    var trigger = wrap.querySelector(TRIGGER_SELECTOR);
+    if (trigger) trigger.setAttribute('aria-expanded', 'false');
+  }
+
+  function hideAll(except) {
+    var open = document.querySelectorAll(WRAP_SELECTOR + '.' + OPEN_CLASS);
+    for (var i = 0; i < open.length; i++) {
+      if (open[i] !== except) hide(open[i]);
+    }
+  }
+
+  function show(wrap) {
+    hideAll(wrap); // one at a time
+    addClass(wrap.querySelector(CONTENT_SELECTOR), VISIBLE_CLASS);
+    addClass(wrap, OPEN_CLASS);
+    var trigger = wrap.querySelector(TRIGGER_SELECTOR);
+    if (trigger) trigger.setAttribute('aria-expanded', 'true');
+  }
+
+  function toggle(wrap) {
+    if (wrap.className.indexOf(OPEN_CLASS) === -1) show(wrap);
+    else hide(wrap);
+  }
+
+  function bind(wrap) {
+    if (wrap[INIT_FLAG]) return;
+    var trigger = wrap.querySelector(TRIGGER_SELECTOR);
+    var content = wrap.querySelector(CONTENT_SELECTOR);
+    if (!trigger || !content) return; // incomplete markup, skip for now
+
+    wrap[INIT_FLAG] = true;
+
+    // accessibility wiring
+    if (!content.id) content.id = 'aw-tip-' + ++uid;
+    content.setAttribute('role', 'tooltip');
+    trigger.setAttribute('aria-describedby', content.id);
+    trigger.setAttribute('aria-expanded', 'false');
+    var tag = trigger.tagName;
+    if (!trigger.hasAttribute('tabindex') && tag !== 'BUTTON' && tag !== 'A') {
+      trigger.setAttribute('tabindex', '0');
+    }
+
+    if (hoverCapable) {
+      wrap.addEventListener('mouseenter', function () {
+        show(wrap);
+      });
+      wrap.addEventListener('mouseleave', function () {
+        hide(wrap);
+      });
+    } else {
+      trigger.addEventListener('click', function (e) {
+        e.stopPropagation(); // don't trip the outside-tap handler below
+        toggle(wrap);
+      });
+    }
+
+    // keyboard focus opens; closing handled when focus leaves the wrap
+    wrap.addEventListener('focusin', function () {
+      show(wrap);
+    });
+    wrap.addEventListener('focusout', function (e) {
+      var to = e.relatedTarget;
+      if (!to || !wrap.contains(to)) hide(wrap);
+    });
+  }
+
+  function scan(root) {
+    var wraps = (root || document).querySelectorAll(WRAP_SELECTOR);
+    for (var i = 0; i < wraps.length; i++) bind(wraps[i]);
+  }
+
+  function init() {
+    scan(document);
+
+    // outside tap closes (tap mode only — hover mode closes on mouseleave)
+    document.addEventListener('click', function (e) {
+      if (hoverCapable) return;
+      if (!closest(e.target, WRAP_SELECTOR)) hideAll(null);
+    });
+
+    // Escape closes any open tooltip
+    document.addEventListener('keydown', function (e) {
+      var key = e.key || e.keyCode;
+      if (key === 'Escape' || key === 'Esc' || key === 27) hideAll(null);
+    });
+
+    // wire up tooltips injected after load (e.g. Finsweet table rows)
+    if (window.MutationObserver) {
+      var observer = new MutationObserver(function (mutations) {
+        for (var i = 0; i < mutations.length; i++) {
+          var added = mutations[i].addedNodes;
+          for (var j = 0; j < added.length; j++) {
+            var node = added[j];
+            if (!node || node.nodeType !== 1) continue;
+            if (matches(node, WRAP_SELECTOR)) bind(node);
+            if (node.querySelectorAll) scan(node);
+          }
+        }
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
