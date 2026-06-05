@@ -423,3 +423,109 @@
     init();
   }
 })();
+
+/* FAQ deep-link opener
+ *
+ * Some hash links (CTAs etc.) scroll the page down to the FAQ section. To stop
+ * the fixed navbar from covering the targeted question, the scroll target is
+ * set in Webflow to the FAQ *above* the one we actually want to read (Webflow
+ * scroll-spy interactions can't add a scroll offset). So when one of those
+ * links is clicked, we open the NEXT FAQ dropdown after the scroll target.
+ *
+ * FAQs are Webflow native dropdowns:
+ *   .faq_dd (.w-dropdown)
+ *     .faq_dd_toggle (.w-dropdown-toggle)   <- the clickable bar
+ *     .faq_dd_list   (.w-dropdown-list)     <- the answer
+ *
+ * We open one by replaying mousedown/mouseup/click on the toggle so Webflow's
+ * own dropdown handler runs and keeps its internal open/closed state in sync —
+ * the user can then still collapse it with a single click. Simply forcing the
+ * `w--open` class would desync that state.
+ *
+ * ES5 only (var / no arrow functions) for browser compatibility.
+ */
+(function () {
+  'use strict';
+
+  var FAQ_SELECTOR = '.faq_dd';
+  var TOGGLE_SELECTOR = '.faq_dd_toggle';
+  var SECTION_SELECTOR = '.faq-section';
+  var OPEN_CLASS = 'w--open';
+  // let the link's own click finish first — Webflow closes any open dropdown on
+  // an outside click, so opening on the next tick avoids being closed instantly.
+  var OPEN_DELAY = 80; // ms
+
+  function matches(el, selector) {
+    if (!el || el.nodeType !== 1) return false;
+    var fn =
+      el.matches ||
+      el.webkitMatchesSelector ||
+      el.msMatchesSelector ||
+      el.mozMatchesSelector;
+    return fn ? fn.call(el, selector) : false;
+  }
+
+  function closest(el, selector) {
+    while (el && el.nodeType === 1) {
+      if (matches(el, selector)) return el;
+      el = el.parentNode;
+    }
+    return null;
+  }
+
+  // First FAQ dropdown that appears AFTER the scroll target in document order.
+  // If the target is itself a FAQ, this returns the one below it; if the target
+  // is inside a FAQ, the FAQ containing it is skipped (it "contains", doesn't
+  // "follow"), so we still land on the next one.
+  function firstFollowingFaq(target) {
+    var faqs = document.querySelectorAll(FAQ_SELECTOR);
+    for (var i = 0; i < faqs.length; i++) {
+      // 4 = Node.DOCUMENT_POSITION_FOLLOWING
+      if (target.compareDocumentPosition(faqs[i]) & 4) return faqs[i];
+    }
+    return null;
+  }
+
+  function fire(el, type) {
+    var ev;
+    try {
+      ev = new MouseEvent(type, { bubbles: true, cancelable: true, view: window });
+    } catch (e) {
+      ev = document.createEvent('MouseEvents');
+      ev.initEvent(type, true, true);
+    }
+    el.dispatchEvent(ev);
+  }
+
+  function openFaq(faq) {
+    if (!faq) return;
+    var toggle = faq.querySelector(TOGGLE_SELECTOR);
+    if (!toggle) return;
+    if (toggle.className.indexOf(OPEN_CLASS) !== -1) return; // already open
+    fire(toggle, 'mousedown');
+    fire(toggle, 'mouseup');
+    fire(toggle, 'click');
+  }
+
+  function resolveTarget(hash) {
+    if (!hash || hash.charAt(0) !== '#' || hash === '#') return null;
+    var id = hash.slice(1);
+    return document.getElementById(id);
+  }
+
+  function onClick(e) {
+    var link = closest(e.target, 'a[href^="#"]');
+    if (!link) return;
+    var target = resolveTarget(link.getAttribute('href'));
+    if (!target) return;
+    // only react to links that scroll into the FAQ area
+    if (!matches(target, FAQ_SELECTOR) && !closest(target, SECTION_SELECTOR)) return;
+    var faq = firstFollowingFaq(target);
+    if (!faq) return;
+    window.setTimeout(function () {
+      openFaq(faq);
+    }, OPEN_DELAY);
+  }
+
+  document.addEventListener('click', onClick, false);
+})();
