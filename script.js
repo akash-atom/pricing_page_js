@@ -249,6 +249,9 @@
   var VISIBLE_CLASS = 'is-visible';
   var OPEN_CLASS = 'is-open';
   var INIT_FLAG = 'awTooltipBound';
+  // grace period (ms) for the cursor to travel from the trigger across any
+  // gap onto the bubble before it closes — lets users reach links inside.
+  var HIDE_DELAY = 250;
 
   // Hover devices use mouseenter/leave; touch devices use tap-to-toggle.
   var hoverCapable = !(
@@ -316,6 +319,22 @@
     else hide(wrap);
   }
 
+  // delayed-close helpers so the cursor can cross the gap onto the bubble
+  function cancelHide(wrap) {
+    if (wrap.awHideTimer) {
+      window.clearTimeout(wrap.awHideTimer);
+      wrap.awHideTimer = null;
+    }
+  }
+
+  function scheduleHide(wrap) {
+    cancelHide(wrap);
+    wrap.awHideTimer = window.setTimeout(function () {
+      wrap.awHideTimer = null;
+      hide(wrap);
+    }, HIDE_DELAY);
+  }
+
   function bind(wrap) {
     if (wrap[INIT_FLAG]) return;
     var trigger = wrap.querySelector(TRIGGER_SELECTOR);
@@ -335,11 +354,14 @@
     }
 
     if (hoverCapable) {
+      // mouseenter/leave on the wrap treat the trigger + bubble (a descendant)
+      // as one region; the delayed hide bridges any visual gap between them.
       wrap.addEventListener('mouseenter', function () {
+        cancelHide(wrap);
         show(wrap);
       });
       wrap.addEventListener('mouseleave', function () {
-        hide(wrap);
+        scheduleHide(wrap);
       });
     } else {
       trigger.addEventListener('click', function (e) {
