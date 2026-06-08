@@ -253,10 +253,9 @@
   // gap onto the bubble before it closes — lets users reach links inside.
   var HIDE_DELAY = 250;
 
-  // Hover devices use mouseenter/leave; touch devices use tap-to-toggle.
-  var hoverCapable = !(
-    window.matchMedia && window.matchMedia('(hover: none)').matches
-  );
+  // We decide hover vs tap per interaction using the real pointer type (see
+  // bind), not a media query — many touch devices report hover-capable, which
+  // made a tap open then instantly close on the synthesized mouseleave.
 
   var uid = 0;
 
@@ -291,9 +290,23 @@
     }
   }
 
+  // The bubble is usually .tooltip-content, but some instances use styled
+  // variants (e.g. .tooltip-content-in-outcome in the second pricing tab).
+  // Fall back to the wrap's first element child that isn't the trigger so the
+  // same script drives every variant without needing each class name listed.
+  function getContent(wrap) {
+    var c = wrap.querySelector(CONTENT_SELECTOR);
+    if (c) return c;
+    var kids = wrap.children;
+    for (var i = 0; i < kids.length; i++) {
+      if (!matches(kids[i], TRIGGER_SELECTOR)) return kids[i];
+    }
+    return null;
+  }
+
   function hide(wrap) {
     if (!wrap) return;
-    removeClass(wrap.querySelector(CONTENT_SELECTOR), VISIBLE_CLASS);
+    removeClass(getContent(wrap), VISIBLE_CLASS);
     removeClass(wrap, OPEN_CLASS);
     var trigger = wrap.querySelector(TRIGGER_SELECTOR);
     if (trigger) trigger.setAttribute('aria-expanded', 'false');
@@ -308,7 +321,7 @@
 
   function show(wrap) {
     hideAll(wrap); // one at a time
-    addClass(wrap.querySelector(CONTENT_SELECTOR), VISIBLE_CLASS);
+    addClass(getContent(wrap), VISIBLE_CLASS);
     addClass(wrap, OPEN_CLASS);
     var trigger = wrap.querySelector(TRIGGER_SELECTOR);
     if (trigger) trigger.setAttribute('aria-expanded', 'true');
@@ -338,7 +351,7 @@
   function bind(wrap) {
     if (wrap[INIT_FLAG]) return;
     var trigger = wrap.querySelector(TRIGGER_SELECTOR);
-    var content = wrap.querySelector(CONTENT_SELECTOR);
+    var content = getContent(wrap);
     if (!trigger || !content) return; // incomplete markup, skip for now
 
     wrap[INIT_FLAG] = true;
@@ -353,25 +366,68 @@
       trigger.setAttribute('tabindex', '0');
     }
 
-    if (hoverCapable) {
-      // mouseenter/leave on the wrap treat the trigger + bubble (a descendant)
-      // as one region; the delayed hide bridges any visual gap between them.
+    // Mouse: hover to open (with a grace delay so the cursor can travel onto
+    // the bubble). Touch/pen: tap the trigger to toggle. We branch on the live
+    // pointer type so a touch tap never triggers the hover path (whose
+    // synthesized mouseleave would close the bubble the instant it opened).
+    var lastPointerType = 'mouse';
+    var pointerActed = false; // a pointer just acted -> a following focus isn't keyboard
+
+    function isMouse(e) {
+      return (e.pointerType || 'mouse') === 'mouse';
+    }
+
+    if (window.PointerEvent) {
+      wrap.addEventListener('pointerdown', function (e) {
+        lastPointerType = e.pointerType || 'mouse';
+        pointerActed = true;
+        window.setTimeout(function () {
+          pointerActed = false;
+        }, 400);
+      });
+      wrap.addEventListener('pointerenter', function (e) {
+        if (!isMouse(e)) return; // hover is a mouse-only affordance
+        cancelHide(wrap);
+        show(wrap);
+      });
+      wrap.addEventListener('pointerleave', function (e) {
+        if (!isMouse(e)) return;
+        scheduleHide(wrap);
+      });
+    } else {
+      // legacy fallback (no Pointer Events): mark touch via touchstart so the
+      // mouse hover handlers below can ignore touch-synthesized mouse events.
+      wrap.addEventListener(
+        'touchstart',
+        function () {
+          lastPointerType = 'touch';
+          pointerActed = true;
+        },
+        true
+      );
       wrap.addEventListener('mouseenter', function () {
+        if (lastPointerType !== 'mouse') return;
         cancelHide(wrap);
         show(wrap);
       });
       wrap.addEventListener('mouseleave', function () {
+        if (lastPointerType !== 'mouse') return;
         scheduleHide(wrap);
-      });
-    } else {
-      trigger.addEventListener('click', function (e) {
-        e.stopPropagation(); // don't trip the outside-tap handler below
-        toggle(wrap);
       });
     }
 
-    // keyboard focus opens; closing handled when focus leaves the wrap
+    // tap-to-toggle for touch/pen; mouse is driven by hover above
+    trigger.addEventListener('click', function (e) {
+      if (lastPointerType === 'mouse') return;
+      e.stopPropagation(); // don't trip the outside-tap handler
+      cancelHide(wrap);
+      toggle(wrap);
+    });
+
+    // keyboard focus opens; skip when the focus came from a pointer so a tap
+    // doesn't both focus-show and click-toggle the bubble back shut.
     wrap.addEventListener('focusin', function () {
+      if (pointerActed) return;
       show(wrap);
     });
     wrap.addEventListener('focusout', function (e) {
@@ -388,9 +444,10 @@
   function init() {
     scan(document);
 
-    // outside tap closes (tap mode only — hover mode closes on mouseleave)
+    // outside click/tap closes any open tooltip. Harmless for mouse (hover
+    // already closed it on leave); a tap on a trigger calls stopPropagation so
+    // it never reaches here, and a click inside a wrap is ignored by closest().
     document.addEventListener('click', function (e) {
-      if (hoverCapable) return;
       if (!closest(e.target, WRAP_SELECTOR)) hideAll(null);
     });
 
